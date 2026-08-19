@@ -30,7 +30,7 @@ class FloatingChipView(context: Context) : View(context) {
     private val density = resources.displayMetrics.density
     private val dp = { v: Float -> v * density }
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
-    private val iconBitmap: Bitmap = BitmapFactory.decodeResource(resources, R.drawable.ic_overlay_button)
+    private val iconBitmap: Bitmap = BitmapFactory.decodeResource(resources, R.mipmap.ic_launcher)
 
     private var windowManager: WindowManager? = null
     private var windowParams: WindowManager.LayoutParams? = null

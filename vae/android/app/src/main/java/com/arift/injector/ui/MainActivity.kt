@@ -5,6 +5,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
+import android.util.Log
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
@@ -24,6 +25,10 @@ import kotlinx.coroutines.launch
  */
 class MainActivity : AppCompatActivity() {
 
+    private companion object {
+        private const val TAG = "ARIFT/Main"
+    }
+
     private lateinit var binding: ActivityMainBinding
     private val injectionManager get() = AriftApplication.instance.injectionManager
     private var scanJob: Job? = null
@@ -35,6 +40,10 @@ class MainActivity : AppCompatActivity() {
 
         binding.btnInject.setOnClickListener { onInjectClicked() }
         binding.btnStop.setOnClickListener { onStopClicked() }
+
+        // One-time overlay permission request up front so INJECT CORE
+        // never gets blocked mid-flow.
+        requestOverlayPermissionIfNeeded()
         startScanner()
     }
 
@@ -43,10 +52,17 @@ class MainActivity : AppCompatActivity() {
         scanJob = lifecycleScope.launch {
             while (isActive) {
                 updateStatus()
-                if (injectionManager.state == InjectionManager.State.READY ||
-                    injectionManager.state == InjectionManager.State.IDLE
+                val state = injectionManager.state
+                if (state == InjectionManager.State.READY ||
+                    state == InjectionManager.State.IDLE
                 ) {
                     injectionManager.autoAttachIfPresent()
+                }
+                // Self-heal: attached but the menu overlay is not up?
+                // Bring it up again (virtual spaces can eat the first
+                // foreground-service start).
+                if (injectionManager.isAttached() && !CheatOverlayService.visible) {
+                    startOverlayService()
                 }
                 delay(2500)
             }
@@ -113,6 +129,10 @@ class MainActivity : AppCompatActivity() {
         } else true
     }
 
+    private fun requestOverlayPermissionIfNeeded() {
+        if (!canDrawOverlays()) requestOverlayPermission()
+    }
+
     private fun requestOverlayPermission() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             startActivity(
@@ -125,6 +145,18 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun startOverlayService() {
-        startForegroundService(Intent(this, CheatOverlayService::class.java))
+        val intent = Intent(this, CheatOverlayService::class.java)
+        try {
+            startForegroundService(intent)
+        } catch (t: Throwable) {
+            // Virtual spaces often block FGS starts — fall back to a
+            // plain service start so the overlay still comes up.
+            Log.w(TAG, "FGS start blocked (${t.message}), falling back to startService")
+            try {
+                startService(intent)
+            } catch (t2: Throwable) {
+                Log.e(TAG, "Overlay service start failed", t2)
+            }
+        }
     }
 }

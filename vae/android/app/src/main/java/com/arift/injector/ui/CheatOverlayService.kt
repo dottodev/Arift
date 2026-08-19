@@ -45,7 +45,13 @@ class CheatOverlayService : Service() {
     override fun onCreate() {
         super.onCreate()
         windowManager = getSystemService(Context.WINDOW_SERVICE) as WindowManager
-        startForeground(NOTIF_ID, buildNotification())
+        try {
+            startForeground(NOTIF_ID, buildNotification())
+        } catch (t: Throwable) {
+            // Some virtual spaces reject foreground notifications; the
+            // overlay window itself still works without one.
+            Log.w(TAG, "startForeground blocked (${t.message}) — continuing")
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -59,7 +65,7 @@ class CheatOverlayService : Service() {
         } else {
             menuView?.makeVisible()
         }
-        visible = true
+        visible = menuView != null || chipView != null
         return START_STICKY
     }
 
