@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:padding="24dp"
+    android:gravity="center_horizontal">
+
+    <TextView
+        android:id="@+id/txtTitle"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="ARIFT MENU"
+        android:textColor="#FFD200"
+        android:textSize="28sp"
+        android:textStyle="bold"
+        android:layout_marginTop="48dp" />
+
+    <TextView
+        android:id="@+id/txtBrand"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="ARIFT MENU — V.A.E OVERLAY"
+        android:textColor="#A0A0AA"
+        android:textSize="12sp"
+        android:layout_marginTop="8dp" />
+
+    <Button
+        android:id="@+id/btnLaunchOverlay"
+        android:layout_width="match_parent"
+        android:layout_height="56dp"
+        android:layout_marginTop="48dp"
+        android:text="@string/btn_overlay"
+        android:backgroundTint="#FFD200"
+        android:textColor="#0C0C0E"
+        android:textStyle="bold" />
+
+    <Button
+        android:id="@+id/btnLaunchInjector"
+        android:layout_width="match_parent"
+        android:layout_height="56dp"
+        android:layout_marginTop="12dp"
+        android:text="@string/btn_inject"
+        android:backgroundTint="#39FF14"
+        android:textColor="#0C0C0E"
+        android:textStyle="bold" />
+
+    <Button
+        android:id="@+id/btnStop"
+        android:layout_width="match_parent"
+        android:layout_height="56dp"
+        android:layout_marginTop="12dp"
+        android:text="@string/btn_stop"
+        android:backgroundTint="#222226"
+        android:textColor="#FFFFFF" />
+
+    <Button
+        android:id="@+id/btnStatus"
+        android:layout_width="match_parent"
+        android:layout_height="56dp"
+        android:layout_marginTop="12dp"
+        android:text="@string/btn_status"
+        android:backgroundTint="#222226"
+        android:textColor="#FFFFFF" />
+
+    <TextView
+        android:id="@+id/txtStatus"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="24dp"
+        android:textColor="#A0A0AA"
+        android:textSize="12sp"
+        android:fontFamily="monospace" />
+</LinearLayout>

@@ -1,0 +1,18 @@
+# Gradle / Android build outputs
+vae/android/.gradle/
+vae/android/build/
+vae/android/app/build/
+vae/android/app/.cxx/
+vae/android/local.properties
+vae/android/release.keystore
+vae/android/*.jks
+vae/android/*.apk
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db

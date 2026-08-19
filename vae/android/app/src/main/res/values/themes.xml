@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.Arift" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <item name="android:statusBarColor">#0C0C0E</item>
+        <item name="android:navigationBarColor">#0C0C0E</item>
+        <item name="android:windowBackground">#0C0C0E</item>
+        <item name="colorPrimary">#FFD200</item>
+        <item name="colorSecondary">#39FF14</item>
+        <item name="colorOnPrimary">#0C0C0E</item>
+    </style>
+</resources>

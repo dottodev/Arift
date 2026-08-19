@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">ARIFT</string>
+    <string name="menu_title">ARIFT MENU</string>
+    <string name="btn_overlay">Deploy Menu Overlay</string>
+    <string name="btn_inject">Inject Core</string>
+    <string name="btn_stop">Stop All</string>
+    <string name="btn_status">Diagnostics</string>
+</resources>
