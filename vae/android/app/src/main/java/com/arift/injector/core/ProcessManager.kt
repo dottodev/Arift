@@ -137,7 +137,7 @@ class ProcessManager {
         }
     }
 
-    private fun readFile(path: String): String? {
+    fun readFile(path: String): String? {
         return try {
             File(path).readText()
         } catch (t: Throwable) {

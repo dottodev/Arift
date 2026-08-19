@@ -8,6 +8,7 @@ import android.provider.Settings
 import android.util.Log
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import com.arift.injector.databinding.ActivityMainBinding
 import com.arift.injector.AriftApplication
@@ -50,18 +51,31 @@ class MainActivity : AppCompatActivity() {
     private fun startScanner() {
         scanJob?.cancel()
         scanJob = lifecycleScope.launch {
+            var tick = 0
             while (isActive) {
-                updateStatus()
+                // Presence scan first so the UI reports "MLBB FOUND" even
+                // before the auto-attach kicks in.
+                injectionManager.reportTargetPresence()
                 val state = injectionManager.state
                 if (state == InjectionManager.State.READY ||
                     state == InjectionManager.State.IDLE
                 ) {
                     injectionManager.autoAttachIfPresent()
                 }
+                // On-device injection verification every ~7.5s while
+                // attached — proves the core can see the game's memory.
+                if (injectionManager.isAttached() && tick % 3 == 0) {
+                    injectionManager.verifyInjection()
+                }
+                tick++
+                updateStatus()
                 // Self-heal: attached but the menu overlay is not up?
-                // Bring it up again (virtual spaces can eat the first
-                // foreground-service start).
-                if (injectionManager.isAttached() && !CheatOverlayService.visible) {
+                // Bring it up again. Only attempt while this activity is
+                // actually foreground — background starts are blocked by
+                // Android and would just burn attempts.
+                if (injectionManager.isAttached() && !CheatOverlayService.visible &&
+                    lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)
+                ) {
                     startOverlayService()
                 }
                 delay(2500)
@@ -74,8 +88,12 @@ class MainActivity : AppCompatActivity() {
             requestOverlayPermission()
             return
         }
+        // Start the overlay FIRST — while we are still in the foreground.
+        // Once the game launches below us the app goes to the background
+        // and Android (targetSdk 34) blocks foreground-service starts,
+        // which is why the menu never appeared after injection.
+        startOverlayService()
         if (injectionManager.isAttached()) {
-            startOverlayService()
             Toast.makeText(this, "Already attached — menu opened", Toast.LENGTH_SHORT).show()
             return
         }
@@ -84,7 +102,6 @@ class MainActivity : AppCompatActivity() {
                 runOnUiThread {
                     result.fold(
                         onSuccess = {
-                            startOverlayService()
                             Toast.makeText(
                                 this@MainActivity,
                                 "Injected (pid=${injectionManager.targetPid})",
@@ -119,8 +136,14 @@ class MainActivity : AppCompatActivity() {
             InjectionManager.State.ATTACHED, InjectionManager.State.ACTIVE -> "ATTACHED"
             InjectionManager.State.SHUTTING_DOWN -> "STOPPING\u2026"
         }
-        val target = if (im.targetPid > 0) "MLBB pid ${im.targetPid}" else "MLBB not found"
-        binding.txtStatus.text = "CORE   $core\nTARGET $target\nSTATE  ${im.state}"
+        val target = when {
+            im.isAttached() || im.targetPid > 0 -> "MLBB FOUND pid ${im.targetPid}"
+            im.lastFoundPid > 0 -> "MLBB FOUND pid ${im.lastFoundPid}"
+            else -> "MLBB not found"
+        }
+        val sb = StringBuilder("CORE   $core\nTARGET $target\nSTATE  ${im.state}")
+        im.recentEvents().takeLast(5).forEach { sb.append("\n\u2022 ").append(it) }
+        binding.txtStatus.text = sb.toString()
     }
 
     private fun canDrawOverlays(): Boolean {

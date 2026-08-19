@@ -17,6 +17,9 @@ import java.util.concurrent.Executors
  *                   attach to it automatically
  *   shutdown()   -> detach, kill container, release everything
  *
+ * Every interesting transition is recorded in a small event ring buffer
+ * so the app UI can show live proof of life ("MLBB FOUND", "Attached").
+ *
  * All heavy work is funneled through a single-threaded executor so state
  * transitions stay serialized.
  */
@@ -57,12 +60,42 @@ class InjectionManager(private val context: Context) {
     var targetLibBase: Long = 0L
         private set
 
+    /** Last MLBB process seen in the virtual space (even before attach). */
+    @Volatile
+    var lastFoundPid: Int = -1
+        private set
+
+    /** Last injection-verification summary (dedupe key for the event log). */
+    @Volatile
+    var lastVerify: String = ""
+        private set
+
     /** When true, the background scanner attaches to MLBB the moment it appears. */
     @Volatile
     var autoAttachEnabled: Boolean = true
         private set
 
+    private val events = ArrayDeque<String>()
+
     private var spawner: VaeSpawner? = null
+
+    // ------------------------------------------------------------------
+    // Event log (shown live in the app status card)
+    // ------------------------------------------------------------------
+
+    fun recentEvents(): List<String> = synchronized(events) { events.toList() }
+
+    private fun addEvent(msg: String) {
+        synchronized(events) {
+            events.addLast(msg)
+            while (events.size > 8) events.removeFirst()
+        }
+        Log.i(TAG, msg)
+    }
+
+    // ------------------------------------------------------------------
+    // Core lifecycle
+    // ------------------------------------------------------------------
 
     fun prepare() {
         synchronized(this) {
@@ -74,9 +107,10 @@ class InjectionManager(private val context: Context) {
                 ensureConfigDir()
                 NativeBridge.ensureLoadedOrThrow()
                 state = State.READY
-                Log.i(TAG, "Injection core ready: ${NativeBridge.nativeVersion()}")
+                addEvent("Core ready: ${NativeBridge.nativeVersion()}")
             } catch (t: Throwable) {
                 state = State.IDLE
+                addEvent("Core load failed: ${t.message}")
                 Log.e(TAG, "Prepare failed", t)
             }
         }
@@ -124,20 +158,39 @@ class InjectionManager(private val context: Context) {
             try {
                 val s = VaeSpawner(context)
                 spawner = s
+                addEvent("Booting V.A.E container\u2026")
                 s.bootContainer()
                 var proc = s.locateTargetOnce()
                 if (proc == null) {
+                    addEvent("Launching MLBB inside V.A.E\u2026")
                     s.launchGame()
                     proc = s.locateTarget()
                 }
+                lastFoundPid = proc.pid
+                addEvent("MLBB found: pid=${proc.pid} (${proc.name})")
                 doAttach(proc.pid, s.resolveLibBase(proc.pid))
+                addEvent("Injected: pid=${proc.pid}")
                 onResult(Result.success(Unit))
             } catch (t: Throwable) {
                 state = State.READY
+                addEvent("Inject failed: ${t.message}")
                 Log.e(TAG, "Launch failed", t)
                 onResult(Result.failure(t))
             }
         }
+    }
+
+    /**
+     * Report whether MLBB is visible in the virtual space right now.
+     * Records an event the first time a new pid is seen. Does not attach.
+     */
+    fun reportTargetPresence(): Boolean {
+        val info = findTargetOnce()
+        if (info != null && info.pid != lastFoundPid) {
+            lastFoundPid = info.pid
+            addEvent("MLBB found: pid=${info.pid} (${info.name})")
+        }
+        return info != null
     }
 
     /**
@@ -150,11 +203,11 @@ class InjectionManager(private val context: Context) {
         if (isAttached()) return true
         val s = state
         if (s != State.READY && s != State.IDLE) return false
-        val info = try {
-            ProcessManager().findTarget()
-        } catch (t: Throwable) {
-            null
-        } ?: return false
+        val info = findTargetOnce() ?: return false
+        if (info.pid != lastFoundPid) {
+            lastFoundPid = info.pid
+            addEvent("MLBB found: pid=${info.pid} (${info.name})")
+        }
         synchronized(this) {
             if (state != State.READY) return false
             state = State.LAUNCHING
@@ -164,13 +217,66 @@ class InjectionManager(private val context: Context) {
                 val sp = VaeSpawner(context)
                 spawner = sp
                 doAttach(info.pid, sp.resolveLibBase(info.pid))
-                Log.i(TAG, "Auto-attached to ${info.name} pid=${info.pid}")
+                addEvent("Attached: pid=${info.pid} (${info.name})")
             } catch (t: Throwable) {
                 state = State.READY
+                addEvent("Attach failed: ${t.message}")
                 Log.e(TAG, "Auto-attach failed", t)
             }
         }
         return true
+    }
+
+    /**
+     * One-shot on-device verification: finds MLBB in the virtual space,
+     * reports attach state, counts the readable memory regions, resolves
+     * the game library base and the feature mask. Records an event only
+     * when the result actually changes (no log spam).
+     */
+    fun verifyInjection(): String {
+        val pm = ProcessManager()
+        val info = pm.findTarget()
+        if (info == null) {
+            if (lastVerify != "no-target") {
+                lastVerify = "no-target"
+                addEvent("Verify: MLBB not found")
+            }
+            return "MLBB not found"
+        }
+        if (info.pid != lastFoundPid) {
+            lastFoundPid = info.pid
+            addEvent("MLBB found: pid=${info.pid} (${info.name})")
+        }
+        val attached = NativeBridge.loaded && NativeBridge.isAlive()
+        val maps = pm.readFile("/proc/${info.pid}/maps") ?: ""
+        val regions = maps.lineSequence().count { it.isNotBlank() }
+        var lib = "none"
+        var base = 0L
+        for (g in ProcessManager.GAME_LIBS) {
+            var found = false
+            for (line in maps.lineSequence()) {
+                if (line.contains(g) && line.contains("r-xp")) {
+                    lib = g
+                    base = line.substringBefore('-').trim().toLongOrNull(16) ?: 0L
+                    found = true
+                    break
+                }
+            }
+            if (found) break
+        }
+        val mask = if (attached) NativeBridge.nativeFeaturesMask() else 0L
+        val summary = buildString {
+            append("MLBB pid=${info.pid}")
+            append(" | attach=${if (attached) "OK" else "no"}")
+            append(" | regions=$regions")
+            if (lib != "none") append(" | $lib @ 0x${base.toString(16)}")
+            append(" | mask=0x${mask.toString(16)}")
+        }
+        if (summary != lastVerify) {
+            lastVerify = summary
+            addEvent("Verify: $summary")
+        }
+        return summary
     }
 
     fun shutdown() {
@@ -185,6 +291,8 @@ class InjectionManager(private val context: Context) {
                     targetPid = -1
                     targetLibBase = 0L
                 }
+                lastFoundPid = -1
+                addEvent("Stopped")
             } catch (t: Throwable) {
                 Log.e(TAG, "Shutdown error", t)
             } finally {
@@ -233,6 +341,14 @@ class InjectionManager(private val context: Context) {
     // ------------------------------------------------------------------
 
     private val pidLock = Any()
+
+    private fun findTargetOnce(): ProcessManager.ProcInfo? {
+        return try {
+            ProcessManager().findTarget()
+        } catch (t: Throwable) {
+            null
+        }
+    }
 
     private fun doAttach(pid: Int, base: Long) {
         synchronized(pidLock) {
