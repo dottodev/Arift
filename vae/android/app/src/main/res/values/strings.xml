@@ -2,8 +2,7 @@
 <resources>
     <string name="app_name">ARIFT</string>
     <string name="menu_title">ARIFT MENU</string>
-    <string name="btn_overlay">Deploy Menu Overlay</string>
-    <string name="btn_inject">Inject Core</string>
-    <string name="btn_stop">Stop All</string>
-    <string name="btn_status">Diagnostics</string>
+    <string name="btn_inject">INJECT CORE</string>
+    <string name="btn_stop">STOP ALL</string>
+    <string name="hint_autoscan">Auto-scans the virtual space for MLBB and attaches on sight.</string>
 </resources>

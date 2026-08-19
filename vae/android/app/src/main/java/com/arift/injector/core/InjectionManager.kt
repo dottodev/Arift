@@ -1,19 +1,21 @@
 package com.arift.injector.core
 
 import android.content.Context
+import android.os.SystemClock
 import android.util.Log
-import com.arift.injector.AriftApplication
 import com.arift.injector.vae.VaeSpawner
 import java.io.File
 import java.util.concurrent.Executors
-import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * InjectionManager orchestrates the full injector lifecycle:
  *
- *   prepare()  -> extract native config, load bridge, warm caches
- *   launch()   -> boot V.A.E container + spawn target, attach, enable features
- *   shutdown() -> detach, kill container, release everything
+ *   prepare()    -> extract native config, load bridge, warm caches
+ *   launch()     -> boot V.A.E container, launch MLBB inside it,
+ *                   wait for the process, attach, enable features
+ *   autoAttach() -> scan the virtual space; if MLBB is already running,
+ *                   attach to it automatically
+ *   shutdown()   -> detach, kill container, release everything
  *
  * All heavy work is funneled through a single-threaded executor so state
  * transitions stay serialized.
@@ -43,9 +45,6 @@ class InjectionManager(private val context: Context) {
         Thread(r, "arift-injection").apply { isDaemon = true }
     }
 
-    private val _state = AtomicBoolean(false)
-    private val pidLock = Any()
-
     @Volatile
     var state: State = State.IDLE
         private set
@@ -56,6 +55,11 @@ class InjectionManager(private val context: Context) {
 
     @Volatile
     var targetLibBase: Long = 0L
+        private set
+
+    /** When true, the background scanner attaches to MLBB the moment it appears. */
+    @Volatile
+    var autoAttachEnabled: Boolean = true
         private set
 
     private var spawner: VaeSpawner? = null
@@ -78,41 +82,99 @@ class InjectionManager(private val context: Context) {
         }
     }
 
+    /** Block until the native core is READY (re-triggers prepare if needed). */
+    fun ensureReady(timeoutMs: Long = 15_000): Boolean {
+        if (state == State.READY) return true
+        if (state == State.IDLE) prepare()
+        val deadline = SystemClock.uptimeMillis() + timeoutMs
+        while (SystemClock.uptimeMillis() < deadline) {
+            val s = state
+            if (s == State.READY) return true
+            if (s != State.PREPARING) return false
+            SystemClock.sleep(100)
+        }
+        return state == State.READY
+    }
+
+    fun isAttached(): Boolean = state == State.ATTACHED || state == State.ACTIVE
+
+    /**
+     * Full injection flow: boot the container, launch MLBB inside the
+     * virtual space if it is not running yet, wait for its process,
+     * resolve the library base and attach the core.
+     */
     fun launch(onResult: (Result<Unit>) -> Unit = {}) {
-        if (state != State.READY) {
+        if (!ensureReady()) {
             onResult(Result.failure(IllegalStateException("Core not ready (state=$state)")))
             return
         }
-        state = State.LAUNCHING
+        if (isAttached()) {
+            onResult(Result.success(Unit))
+            return
+        }
+        synchronized(this) {
+            if (state != State.READY) {
+                onResult(Result.failure(IllegalStateException("Busy (state=$state)")))
+                return
+            }
+            state = State.LAUNCHING
+            autoAttachEnabled = true
+        }
         executor.execute {
             try {
                 val s = VaeSpawner(context)
                 spawner = s
                 s.bootContainer()
-                val proc = s.locateTarget()
-                val pid = proc.pid
-                val base = s.resolveLibBase(pid)
-                synchronized(pidLock) {
-                    targetPid = pid
-                    targetLibBase = base
+                var proc = s.locateTargetOnce()
+                if (proc == null) {
+                    s.launchGame()
+                    proc = s.locateTarget()
                 }
-                val ok = NativeBridge.attach(pid, base)
-                if (!ok) {
-                    throw IllegalStateException("Attach failed: ${NativeBridge.nativeLastError()}")
-                }
-                state = State.ATTACHED
-                applyStoredFeatureMask()
-                state = State.ACTIVE
-                Log.i(TAG, "Attached to pid=$pid base=0x${base.toString(16)}")
+                doAttach(proc.pid, s.resolveLibBase(proc.pid))
                 onResult(Result.success(Unit))
             } catch (t: Throwable) {
                 state = State.READY
+                Log.e(TAG, "Launch failed", t)
                 onResult(Result.failure(t))
             }
         }
     }
 
+    /**
+     * Scan the virtual space once for MLBB. If it is already running,
+     * attach to it immediately. Returns true when the scan found and
+     * queued an attachment.
+     */
+    fun autoAttachIfPresent(): Boolean {
+        if (!autoAttachEnabled) return false
+        if (isAttached()) return true
+        val s = state
+        if (s != State.READY && s != State.IDLE) return false
+        val info = try {
+            ProcessManager().findTarget()
+        } catch (t: Throwable) {
+            null
+        } ?: return false
+        synchronized(this) {
+            if (state != State.READY) return false
+            state = State.LAUNCHING
+        }
+        executor.execute {
+            try {
+                val sp = VaeSpawner(context)
+                spawner = sp
+                doAttach(info.pid, sp.resolveLibBase(info.pid))
+                Log.i(TAG, "Auto-attached to ${info.name} pid=${info.pid}")
+            } catch (t: Throwable) {
+                state = State.READY
+                Log.e(TAG, "Auto-attach failed", t)
+            }
+        }
+        return true
+    }
+
     fun shutdown() {
+        autoAttachEnabled = false
         state = State.SHUTTING_DOWN
         executor.execute {
             try {
@@ -169,6 +231,23 @@ class InjectionManager(private val context: Context) {
     fun rankBoosterSnapshot(): String = NativeBridge.nativeRbSnapshot()
 
     // ------------------------------------------------------------------
+
+    private val pidLock = Any()
+
+    private fun doAttach(pid: Int, base: Long) {
+        synchronized(pidLock) {
+            targetPid = pid
+            targetLibBase = base
+        }
+        val ok = NativeBridge.attach(pid, base)
+        if (!ok) {
+            throw IllegalStateException("Attach failed: ${NativeBridge.nativeLastError()}")
+        }
+        state = State.ATTACHED
+        applyStoredFeatureMask()
+        state = State.ACTIVE
+        Log.i(TAG, "Attached to pid=$pid base=0x${base.toString(16)}")
+    }
 
     private fun ensureConfigDir() {
         val dir = File(context.filesDir, "arift")

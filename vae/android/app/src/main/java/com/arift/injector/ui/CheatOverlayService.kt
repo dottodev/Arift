@@ -18,8 +18,8 @@ import com.arift.injector.R
 
 /**
  * CheatOverlayService — draws the "ARIFT MENU" as a floating overlay
- * above every window inside the V.A.E. The menu is movable and
- * collapsible to a small floating chip.
+ * above every window inside the V.A.E. The menu is movable and can be
+ * minimized to a small floating chip; tapping the chip restores it.
  */
 class CheatOverlayService : Service() {
 
@@ -37,6 +37,9 @@ class CheatOverlayService : Service() {
     private var menuView: CheatMenuView? = null
     private var chipView: FloatingChipView? = null
 
+    private var lastMenuX = 24
+    private var lastMenuY = 160
+
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onCreate() {
@@ -51,7 +54,7 @@ class CheatOverlayService : Service() {
             stopSelf()
             return START_NOT_STICKY
         }
-        if (menuView == null) {
+        if (menuView == null && chipView == null) {
             showMenu()
         } else {
             menuView?.makeVisible()
@@ -60,9 +63,8 @@ class CheatOverlayService : Service() {
         return START_STICKY
     }
 
-    private fun showMenu() {
-        val view = CheatMenuView(this)
-        val params = WindowManager.LayoutParams(
+    private fun baseParams(): WindowManager.LayoutParams =
+        WindowManager.LayoutParams(
             WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
@@ -71,28 +73,75 @@ class CheatOverlayService : Service() {
             PixelFormat.TRANSLUCENT
         ).apply {
             gravity = Gravity.TOP or Gravity.START
-            x = 24
-            y = 160
+        }
+
+    private fun showMenu() {
+        if (menuView != null) return
+        removeChip()
+        val view = CheatMenuView(this)
+        view.onMinimize = { showChip() }
+        val params = baseParams().apply {
+            x = lastMenuX
+            y = lastMenuY
         }
         try {
             windowManager.addView(view, params)
             menuView = view
             menuView?.attach(params, windowManager)
-            Log.i(TAG, "ARIFT MENU drawn")
+            Log.i(TAG, "ARIFT MENU drawn at $lastMenuX,$lastMenuY")
         } catch (t: Throwable) {
             Log.e(TAG, "Failed to draw overlay", t)
         }
     }
 
+    private fun showChip() {
+        if (chipView != null) return
+        removeMenu()
+        val chip = FloatingChipView(this)
+        chip.onTap = { showMenu() }
+        val params = baseParams().apply {
+            x = lastMenuX
+            y = lastMenuY
+        }
+        try {
+            windowManager.addView(chip, params)
+            chipView = chip
+            chipView?.attach(params, windowManager)
+            Log.i(TAG, "ARIFT MENU minimized to chip")
+        } catch (t: Throwable) {
+            Log.e(TAG, "Failed to draw chip", t)
+        }
+    }
+
+    private fun removeMenu() {
+        menuView?.let {
+            try {
+                it.detach()
+            } catch (t: Throwable) {
+                Log.e(TAG, "Menu remove error", t)
+            }
+        }
+        menuView = null
+    }
+
+    private fun removeChip() {
+        chipView?.let {
+            try {
+                it.detach()
+            } catch (t: Throwable) {
+                Log.e(TAG, "Chip remove error", t)
+            }
+        }
+        chipView = null
+    }
+
     override fun onDestroy() {
         try {
-            menuView?.detach()
-            chipView?.detach()
+            removeMenu()
+            removeChip()
         } catch (t: Throwable) {
             Log.e(TAG, "Cleanup error", t)
         }
-        menuView = null
-        chipView = null
         visible = false
         super.onDestroy()
     }

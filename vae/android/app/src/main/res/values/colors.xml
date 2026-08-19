@@ -1,4 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <color name="ic_launcher_bg">#0C0C0E</color>
+    <color name="arift_bg">#0B0C10</color>
+    <color name="arift_card">#14161C</color>
+    <color name="arift_card_alt">#1A1D26</color>
+    <color name="arift_accent">#FFD200</color>
+    <color name="arift_green">#39FF14</color>
+    <color name="arift_red">#FF3B4D</color>
+    <color name="arift_text">#F2F3F7</color>
+    <color name="arift_dim">#8A90A0</color>
+    <color name="arift_border">#262B36</color>
 </resources>

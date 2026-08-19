@@ -61,6 +61,29 @@ class VaeSpawner(private val context: Context) {
         throw IllegalStateException("Target process never appeared in V.A.E")
     }
 
+    /** Single scan — returns the target if MLBB is already running. */
+    fun locateTargetOnce(): ProcessManager.ProcInfo? = processManager.findTarget()
+
+    /** Launch MLBB inside the virtual space (no-op if it is already up). */
+    fun launchGame(): Boolean {
+        for (pkg in ProcessManager.GAME_PROCESS_NAMES) {
+            try {
+                val intent = context.packageManager.getLaunchIntentForPackage(pkg) ?: continue
+                intent.addFlags(
+                    Intent.FLAG_ACTIVITY_NEW_TASK or
+                        Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED
+                )
+                context.startActivity(intent)
+                Log.i(TAG, "Launched $pkg inside V.A.E")
+                return true
+            } catch (t: Throwable) {
+                Log.w(TAG, "Launch $pkg failed: ${t.message}")
+            }
+        }
+        Log.w(TAG, "MLBB launch intent not found — is it installed in the V.A.E?")
+        return false
+    }
+
     /** Resolve the game's primary library base address for the injection core. */
     fun resolveLibBase(pid: Int): Long {
         val (lib, base) = processManager.resolveLibBaseAuto(pid)
