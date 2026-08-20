@@ -12,8 +12,8 @@ android {
         applicationId = "com.arift.injector"
         minSdk = 26
         targetSdk = 34
-        versionCode = 4
-        versionName = "1.1.3"
+        versionCode = 5
+        versionName = "1.1.4"
         ndk {
             abiFilters += listOf("arm64-v8a")
         }

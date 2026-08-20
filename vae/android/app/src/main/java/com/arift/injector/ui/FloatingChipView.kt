@@ -2,16 +2,15 @@ package com.arift.injector.ui
 
 import android.content.Context
 import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.RectF
 import android.os.Handler
 import android.os.Looper
-import android.util.Log
 import android.view.MotionEvent
 import android.view.View
+import androidx.appcompat.content.res.AppCompatResources
 import com.arift.injector.R
 import kotlin.math.abs
 
@@ -22,6 +21,11 @@ import kotlin.math.abs
  *
  * Lives as a CHILD of the overlay's single window (see CheatOverlayService);
  * dragging delegates to the service, which moves the shared window.
+ *
+ * The app icon is rendered defensively: the launcher icon on API 26+ is an
+ * adaptive-icon XML that BitmapFactory cannot decode (returns null). We
+ * inflate it as a Drawable instead; if that ever fails we draw a plain
+ * glyph so the chip still renders instead of crashing.
  */
 class FloatingChipView(context: Context) : View(context) {
 
@@ -38,7 +42,7 @@ class FloatingChipView(context: Context) : View(context) {
     private val density = resources.displayMetrics.density
     private val dp = { v: Float -> v * density }
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
-    private val iconBitmap: Bitmap = BitmapFactory.decodeResource(resources, R.mipmap.ic_launcher)
+    private var iconBitmap: Bitmap? = null
 
     private var lastTouchX = 0f
     private var lastTouchY = 0f
@@ -59,6 +63,24 @@ class FloatingChipView(context: Context) : View(context) {
     init {
         setBackgroundColor(Color.TRANSPARENT)
         isClickable = true
+    }
+
+    /** Lazy, never-throwing icon load. */
+    private fun ensureIcon(): Bitmap? {
+        iconBitmap?.let { return it }
+        val bmp = try {
+            val d = AppCompatResources.getDrawable(context, R.mipmap.ic_launcher) ?: return null
+            val size = (76f * density).toInt()
+            val b = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+            val c = Canvas(b)
+            d.setBounds(0, 0, size, size)
+            d.draw(c)
+            b
+        } catch (t: Throwable) {
+            null
+        }
+        iconBitmap = bmp
+        return bmp
     }
 
     // ------------------------------------------------------------------
@@ -95,15 +117,26 @@ class FloatingChipView(context: Context) : View(context) {
         paint.color = Color.rgb(255, 210, 0)
         canvas.drawCircle(center, center, size / 2f - dp(1f), paint)
 
-        // Icon
+        // Icon (or glyph fallback if the icon can't be rendered)
         val iconSize = 38f * density
         val offset = (size - iconSize) / 2f
-        canvas.drawBitmap(
-            iconBitmap,
-            null,
-            RectF(offset, offset, offset + iconSize, offset + iconSize),
-            paint
-        )
+        val icon = ensureIcon()
+        if (icon != null) {
+            canvas.drawBitmap(
+                icon,
+                null,
+                RectF(offset, offset, offset + iconSize, offset + iconSize),
+                paint
+            )
+        } else {
+            paint.style = Paint.Style.FILL
+            paint.color = Color.WHITE
+            paint.textSize = dp(24f)
+            paint.textAlign = Paint.Align.CENTER
+            val baseline = center - (paint.descent() + paint.ascent()) / 2f
+            canvas.drawText("A", center, baseline, paint)
+            paint.textAlign = Paint.Align.LEFT
+        }
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {

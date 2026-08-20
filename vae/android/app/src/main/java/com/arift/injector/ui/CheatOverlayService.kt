@@ -65,14 +65,21 @@ class CheatOverlayService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(this)) {
-            Log.w(TAG, "Overlay permission missing")
-            stopSelf()
-            return START_NOT_STICKY
-        }
-        if (overlayRoot == null) {
-            // Floating icon FIRST — the menu only opens when tapped.
-            showChip()
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(this)) {
+                Log.w(TAG, "Overlay permission missing")
+                report("overlay permission missing")
+                stopSelf()
+                return START_NOT_STICKY
+            }
+            if (overlayRoot == null) {
+                // Floating icon FIRST — the menu only opens when tapped.
+                showChip()
+            }
+        } catch (t: Throwable) {
+            // The overlay must never take the app down with it.
+            report("overlay start failed: ${t.message}")
+            Log.e(TAG, "onStartCommand failed", t)
         }
         visible = overlayRoot != null
         return START_STICKY
@@ -136,35 +143,45 @@ class CheatOverlayService : Service() {
     private fun showChip() {
         if (chipView != null) return
         val root = ensureRoot() ?: return
-        val chip = FloatingChipView(this).apply {
-            onTap = { showMenu() }
-            onDrag = { dx, dy -> onOverlayDrag(dx, dy) }
+        try {
+            val chip = FloatingChipView(this).apply {
+                onTap = { showMenu() }
+                onDrag = { dx, dy -> onOverlayDrag(dx, dy) }
+            }
+            root.removeAllViews()
+            root.addView(chip)
+            chipView = chip
+            menuView = null
+            report("chip shown")
+            Log.i(TAG, "Chip shown")
+        } catch (t: Throwable) {
+            report("chip failed: ${t.message}")
+            Log.e(TAG, "Chip show failed", t)
         }
-        root.removeAllViews()
-        root.addView(chip)
-        chipView = chip
-        menuView = null
-        report("chip shown")
-        Log.i(TAG, "Chip shown")
     }
 
     private fun showMenu() {
         if (menuView != null) return
         val root = ensureRoot() ?: return
-        val menu = CheatMenuView(this).apply {
-            onMinimize = { showChip() }
-            onDrag = { dx, dy -> onOverlayDrag(dx, dy) }
-            onExit = {
-                report("overlay closed")
-                removeOverlay()
+        try {
+            val menu = CheatMenuView(this).apply {
+                onMinimize = { showChip() }
+                onDrag = { dx, dy -> onOverlayDrag(dx, dy) }
+                onExit = {
+                    report("overlay closed")
+                    removeOverlay()
+                }
             }
+            root.removeAllViews()
+            root.addView(menu)
+            menuView = menu
+            chipView = null
+            report("menu shown")
+            Log.i(TAG, "Menu shown")
+        } catch (t: Throwable) {
+            report("menu failed: ${t.message}")
+            Log.e(TAG, "Menu show failed", t)
         }
-        root.removeAllViews()
-        root.addView(menu)
-        menuView = menu
-        chipView = null
-        report("menu shown")
-        Log.i(TAG, "Menu shown")
     }
 
     private fun removeOverlay() {
