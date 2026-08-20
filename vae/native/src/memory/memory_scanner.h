@@ -18,6 +18,7 @@ public:
     bool open(int pid);
     void close();
     bool isOpen() const { return fd_ >= 0; }
+    bool isReadOnly() const { return read_only_; }
     int pid() const { return pid_; }
 
     // Raw reads — return false on fault (unmapped page, EPERM, etc).
@@ -65,6 +66,7 @@ private:
     int fd_ = -1;
     int pid_ = -1;
     int last_errno_ = 0;
+    bool read_only_ = false;
     uint64_t total_reads_ = 0;
     uint64_t total_writes_ = 0;
     size_t pageSize_ = 4096;

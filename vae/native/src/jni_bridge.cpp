@@ -1,10 +1,13 @@
 #include <jni.h>
 
+#include <cstdio>
+#include <cstring>
 #include <string>
 
 #include "arift_core_api.h"
 #include "arift_log.h"
 #include "arift_utils.h"
+#include "memory_scanner.h"
 
 using namespace arift;
 
@@ -88,6 +91,47 @@ Java_com_arift_injector_core_NativeBridge_nativeIsAttached(JNIEnv*, jclass) {
 JNIEXPORT jint JNICALL
 Java_com_arift_injector_core_NativeBridge_nativeTargetPid(JNIEnv*, jclass) {
     return AriftCore::instance().targetPid();
+}
+
+// ---------------------------------------------------------------------------
+
+JNIEXPORT jstring JNICALL
+Java_com_arift_injector_core_NativeBridge_nativeProbeMemory(JNIEnv* env, jclass,
+                                                            jint pid,
+                                                            jlong libBase) {
+    ProcessMemory mem;
+    if (!mem.open(pid)) {
+        std::string out = "open failed errno=" + std::to_string(mem.lastErrno()) +
+                          " (" + strerror(mem.lastErrno()) + ")";
+        return toJString(env, out);
+    }
+    uint32_t magic = 0;
+    if (!mem.read32(static_cast<uintptr_t>(libBase), magic)) {
+        std::string out = "read failed errno=" + std::to_string(mem.lastErrno()) +
+                          " (" + strerror(mem.lastErrno()) + ")";
+        return toJString(env, out);
+    }
+    char buf[160];
+    snprintf(buf, sizeof(buf), "ok ro=%s base=0x%llx probe=0x%08x",
+             mem.isReadOnly() ? "yes" : "no",
+             static_cast<unsigned long long>(libBase), magic);
+    return toJString(env, buf);
+}
+
+JNIEXPORT jstring JNICALL
+Java_com_arift_injector_core_NativeBridge_nativeRootInfo(JNIEnv* env, jclass) {
+    std::string out = "root=";
+    out += utils::isRootAvailable() ? "yes" : "no";
+    FILE* p = popen("cat /sys/fs/selinux/enforce 2>/dev/null", "r");
+    if (p) {
+        char c = 0;
+        if (fread(&c, 1, 1, p) == 1) {
+            out += " selinux=";
+            out += (c == '1') ? "enforcing" : "permissive";
+        }
+        pclose(p);
+    }
+    return toJString(env, out);
 }
 
 // ---------------------------------------------------------------------------

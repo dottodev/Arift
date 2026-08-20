@@ -3,10 +3,14 @@
 #include <sys/time.h>
 #include <time.h>
 
+#include <unistd.h>
+
 #include <chrono>
 #include <cstdarg>
 #include <cmath>
+#include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <random>
 #include <sstream>
 
@@ -171,6 +175,25 @@ uintptr_t alignUpPtr(uintptr_t v, size_t align) {
 
 bool isPow2(size_t v) {
     return v && !(v & (v - 1));
+}
+
+bool isRootAvailable() {
+    if (getuid() == 0 || geteuid() == 0) return true;
+    FILE* p = popen("su -c id 2>/dev/null", "r");
+    if (!p) return false;
+    char buf[128] = {};
+    size_t n = fread(buf, 1, sizeof(buf) - 1, p);
+    int rc = pclose(p);
+    (void)rc;
+    buf[n] = '\0';
+    return strstr(buf, "uid=0") != nullptr;
+}
+
+bool setSelinuxPermissive() {
+    if (getuid() == 0) {
+        return system("setenforce 0 2>/dev/null") == 0;
+    }
+    return system("su -c setenforce 0 2>/dev/null") == 0;
 }
 
 }  // namespace utils

@@ -120,6 +120,40 @@ class ProcessManager {
         }
     }
 
+    /** Kill the game's subprocesses (anti-cheat services like :UnityKillsMe). */
+    fun killGameSubprocesses(gamePid: Int, gameName: String): List<Int> {
+        val killed = mutableListOf<Int>()
+        val procDir = File("/proc")
+        val pids = procDir.listFiles { f -> f.name.toIntOrNull() != null } ?: return killed
+        for (dir in pids) {
+            val pid = dir.name.toInt()
+            if (pid == gamePid) continue
+            val cmd = readLine("/proc/$pid/cmdline") ?: continue
+            if (!cmd.startsWith("$gameName:")) continue
+            val info = readProcInfo(pid)
+            if (info != null && info.uid == android.os.Process.myUid()) {
+                try {
+                    android.os.Process.killProcess(pid)
+                    killed += pid
+                    Log.i(TAG, "Killed game subprocess: $cmd (pid=$pid)")
+                } catch (t: Throwable) {
+                    Log.w(TAG, "Failed to kill $cmd pid=$pid", t)
+                }
+            } else {
+                try {
+                    val pr = Runtime.getRuntime().exec(
+                        arrayOf("su", "-c", "kill", "-9", pid.toString()))
+                    pr.waitFor()
+                    killed += pid
+                    Log.i(TAG, "Killed game subprocess via su: $cmd (pid=$pid)")
+                } catch (t: Throwable) {
+                    Log.w(TAG, "su kill failed for $cmd pid=$pid", t)
+                }
+            }
+        }
+        return killed
+    }
+
     fun enumerateThreads(pid: Int): List<Int> {
         val dir = File("/proc/$pid/task") ?: return emptyList()
         return dir.listFiles { f -> f.name.toIntOrNull() != null }

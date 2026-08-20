@@ -63,6 +63,10 @@ object NativeBridge {
 
     external fun nativeTargetPid(): Int
 
+    external fun nativeProbeMemory(pid: Int, libBase: Long): String
+
+    external fun nativeRootInfo(): String
+
     // ------------------------------------------------------------------
     // Feature switches
     // ------------------------------------------------------------------

@@ -24,16 +24,49 @@ ProcessMemory::~ProcessMemory() {
 bool ProcessMemory::open(int pid) {
     close();
     std::string path = "/proc/" + std::to_string(pid) + "/mem";
+    read_only_ = false;
     fd_ = ::open(path.c_str(), O_RDWR | O_CLOEXEC);
     if (fd_ < 0) {
         last_errno_ = errno;
-        ARIFT_WARN(kTagMemory, "open(%s) failed: %s", path.c_str(), strerror(errno));
+        ARIFT_WARN(kTagMemory, "open(%s O_RDWR) failed: %s",
+                   path.c_str(), strerror(errno));
+        if (errno == EACCES) {
+            fd_ = ::open(path.c_str(), O_RDONLY | O_CLOEXEC);
+            if (fd_ >= 0) {
+                read_only_ = true;
+                last_errno_ = 0;
+                ARIFT_INFO(kTagMemory, "open(%s) fell back to O_RDONLY", path.c_str());
+            } else {
+                last_errno_ = errno;
+                if (utils::isRootAvailable()) {
+                    ARIFT_WARN(kTagMemory,
+                               "open(%s) blocked by policy; trying SELinux permissive",
+                               path.c_str());
+                    if (utils::setSelinuxPermissive()) {
+                        fd_ = ::open(path.c_str(), O_RDWR | O_CLOEXEC);
+                        if (fd_ >= 0) {
+                            last_errno_ = 0;
+                            ARIFT_INFO(kTagMemory,
+                                       "open(%s) succeeded after setenforce 0",
+                                       path.c_str());
+                        } else {
+                            last_errno_ = errno;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if (fd_ < 0) {
+        ARIFT_WARN(kTagMemory, "open(%s) failed: %s (errno=%d)",
+                   path.c_str(), strerror(last_errno_), last_errno_);
         return false;
     }
     pid_ = pid;
     pageSize_ = static_cast<size_t>(sysconf(_SC_PAGESIZE));
     if (pageSize_ == 0) pageSize_ = 4096;
-    ARIFT_DEBUG(kTagMemory, "ProcessMemory open pid=%d", pid);
+    ARIFT_DEBUG(kTagMemory, "ProcessMemory open pid=%d%s", pid,
+                read_only_ ? " (read-only)" : "");
     return true;
 }
 
@@ -58,6 +91,10 @@ bool ProcessMemory::read(uintptr_t addr, void* out, size_t len) {
 
 bool ProcessMemory::write(uintptr_t addr, const void* in, size_t len) {
     if (fd_ < 0) return false;
+    if (read_only_) {
+        last_errno_ = EBADF;
+        return false;
+    }
     ssize_t n = pwrite(fd_, in, len, static_cast<off_t>(addr));
     if (n != static_cast<ssize_t>(len)) {
         last_errno_ = errno;

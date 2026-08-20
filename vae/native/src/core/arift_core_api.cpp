@@ -1,8 +1,11 @@
 #include "arift_core_api.h"
 
+#include <cstring>
+
 #include "arift_log.h"
 #include "arift_utils.h"
 #include "feature_switch.h"
+#include "memory_scanner.h"
 
 namespace arift {
 
@@ -52,11 +55,29 @@ int AriftCore::attach(int pid, uintptr_t libBase) {
         setLastError("invalid pid or base");
         return -1;
     }
+    ProcessMemory mem;
+    if (!mem.open(pid)) {
+        char buf[192];
+        snprintf(buf, sizeof(buf), "mem open failed (errno=%d: %s)",
+                 mem.lastErrno(), strerror(mem.lastErrno()));
+        setLastError(buf);
+        ARIFT_ERROR(kTagCore, "attach probe failed: %s", buf);
+        return -1;
+    }
+    uint32_t magic = 0;
+    if (!mem.read32(libBase, magic)) {
+        char buf[192];
+        snprintf(buf, sizeof(buf), "mem read @ base failed (errno=%d: %s)",
+                 mem.lastErrno(), strerror(mem.lastErrno()));
+        setLastError(buf);
+        ARIFT_ERROR(kTagCore, "attach probe failed: %s", buf);
+        return -1;
+    }
     pid_ = pid;
     lib_base_ = libBase;
     attached_ = true;
-    ARIFT_INFO(kTagCore, "Attached to pid=%d base=%llx",
-               pid, static_cast<unsigned long long>(libBase));
+    ARIFT_INFO(kTagCore, "Attached to pid=%d base=%llx probe=0x%08x",
+               pid, static_cast<unsigned long long>(libBase), magic);
     return 0;
 }
 

@@ -52,5 +52,9 @@ uintptr_t alignUpPtr(uintptr_t v, size_t align);
 
 bool isPow2(size_t v);
 
+// Root / SELinux helpers (used by ProcessMemory open fallback).
+bool isRootAvailable();
+bool setSelinuxPermissive();
+
 }  // namespace utils
 }  // namespace arift

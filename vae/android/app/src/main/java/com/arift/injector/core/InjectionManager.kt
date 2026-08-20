@@ -70,6 +70,10 @@ class InjectionManager(private val context: Context) {
     var lastVerify: String = ""
         private set
 
+    /** Last environment info (root/SELinux) — dedupe key for the event log. */
+    @Volatile
+    private var lastEnvInfo: String = ""
+
     /** When true, the background scanner attaches to MLBB the moment it appears. */
     @Volatile
     var autoAttachEnabled: Boolean = true
@@ -354,6 +358,28 @@ class InjectionManager(private val context: Context) {
         synchronized(pidLock) {
             targetPid = pid
             targetLibBase = base
+        }
+        val pm = ProcessManager()
+        val probe = NativeBridge.nativeProbeMemory(pid, base)
+        val env = NativeBridge.nativeRootInfo()
+        if (env != lastEnvInfo) {
+            lastEnvInfo = env
+            addEvent("Env: $env")
+        }
+        val gameName = pm.readFile("/proc/$pid/cmdline")
+            ?.substringBefore('\u0000')?.trim().orEmpty()
+        val info = pm.readProcInfo(pid)
+        if (info != null && info.uid != android.os.Process.myUid()) {
+            addEvent("UID mismatch: game=${info.uid} vs us=${android.os.Process.myUid()}")
+        }
+        if (probe.startsWith("ok")) {
+            addEvent("Memory: $probe")
+        } else {
+            addEvent("Memory blocked: $probe — killing anti-cheat\u2026")
+            val killed = pm.killGameSubprocesses(
+                pid, gameName.ifEmpty { ProcessManager.GAME_PROCESS_NAMES.first() })
+            if (killed.isNotEmpty()) addEvent("Anti-cheat killed: ${killed.joinToString()}")
+            addEvent("Memory retry: ${NativeBridge.nativeProbeMemory(pid, base)}")
         }
         val ok = NativeBridge.attach(pid, base)
         if (!ok) {
