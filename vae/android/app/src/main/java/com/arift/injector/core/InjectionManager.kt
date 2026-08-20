@@ -85,7 +85,7 @@ class InjectionManager(private val context: Context) {
 
     fun recentEvents(): List<String> = synchronized(events) { events.toList() }
 
-    private fun addEvent(msg: String) {
+    fun addEvent(msg: String) {
         synchronized(events) {
             events.addLast(msg)
             while (events.size > 8) events.removeFirst()

@@ -14,7 +14,6 @@ import android.os.Looper
 import android.util.Log
 import android.view.MotionEvent
 import android.view.View
-import android.view.WindowManager
 import com.arift.injector.AriftApplication
 import com.arift.injector.core.InjectionManager
 import kotlin.math.abs
@@ -27,6 +26,10 @@ import kotlin.math.abs
  *  - Pill toggles per feature
  *  - Drag anywhere on the panel (smooth incremental drag, clamped)
  *  - Minimize (—) button + title tap collapse to the floating chip
+ *
+ * Lives as a CHILD of the overlay's single window (see CheatOverlayService);
+ * it never touches the WindowManager itself — dragging delegates to the
+ * service, which moves the shared window.
  */
 @SuppressLint("ViewConstructor")
 class CheatMenuView(context: Context) : View(context) {
@@ -64,6 +67,12 @@ class CheatMenuView(context: Context) : View(context) {
     /** Invoked when the user minimizes the menu to the floating chip. */
     var onMinimize: (() -> Unit)? = null
 
+    /** Invoked while the user drags the panel (delegates window movement). */
+    var onDrag: ((dx: Float, dy: Float) -> Unit)? = null
+
+    /** Invoked when the user hits EXIT (menu closes the overlay). */
+    var onExit: (() -> Unit)? = null
+
     // ------------------------------------------------------------------
     // Palette
     // ------------------------------------------------------------------
@@ -99,13 +108,11 @@ class CheatMenuView(context: Context) : View(context) {
     private var lastTouchX = 0f
     private var lastTouchY = 0f
     private var isDragging = false
-    private var windowParams: WindowManager.LayoutParams? = null
-    private var windowManager: WindowManager? = null
 
     private val handler = Handler(Looper.getMainLooper())
     private val refreshRunnable = object : Runnable {
         override fun run() {
-            if (attached) {
+            if (isAttachedToWindow) {
                 invalidate()
                 handler.postDelayed(this, 100)
             }
@@ -116,34 +123,23 @@ class CheatMenuView(context: Context) : View(context) {
     private val panelRect = RectF()
     private val roundRect = RectF()
 
-    private var attached = false
-
     init {
         setBackgroundColor(Color.TRANSPARENT)
         isClickable = true
     }
 
     // ------------------------------------------------------------------
-    // Lifecycle
+    // Lifecycle (refresh loop runs only while the view is attached)
     // ------------------------------------------------------------------
 
-    fun attach(params: WindowManager.LayoutParams, wm: WindowManager) {
-        windowParams = params
-        windowManager = wm
-        attached = true
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
         handler.post(refreshRunnable)
     }
 
-    fun detach() {
-        attached = false
+    override fun onDetachedFromWindow() {
         handler.removeCallbacks(refreshRunnable)
-        windowManager?.removeView(this)
-        windowManager = null
-    }
-
-    fun makeVisible() {
-        attached = true
-        handler.post(refreshRunnable)
+        super.onDetachedFromWindow()
     }
 
     // ------------------------------------------------------------------
@@ -308,7 +304,7 @@ class CheatMenuView(context: Context) : View(context) {
                     isDragging = true
                 }
                 if (isDragging) {
-                    moveWindow(dx, dy)
+                    onDrag?.invoke(dx, dy)
                     lastTouchX = event.x
                     lastTouchY = event.y
                 }
@@ -323,22 +319,6 @@ class CheatMenuView(context: Context) : View(context) {
             }
         }
         return super.onTouchEvent(event)
-    }
-
-    private fun moveWindow(dx: Float, dy: Float) {
-        val p = windowParams ?: return
-        val wm = windowManager ?: return
-        val sw = resources.displayMetrics.widthPixels
-        val sh = resources.displayMetrics.heightPixels
-        val minX = -(panelWidth * 2f / 3f).toInt()
-        val maxX = sw - (panelWidth / 3f).toInt()
-        p.x = (p.x + dx).toInt().coerceIn(minX, maxX)
-        p.y = (p.y + dy).toInt().coerceIn(0, sh - dp(120f).toInt())
-        try {
-            wm.updateViewLayout(this, p)
-        } catch (t: Throwable) {
-            Log.e(TAG, "Drag update failed", t)
-        }
     }
 
     private fun handleTap(x: Float, y: Float) {
@@ -364,7 +344,7 @@ class CheatMenuView(context: Context) : View(context) {
             val tab = ((x - padding) / tabWidth).toInt().coerceIn(0, 3)
             if (tab == TAB_EXIT) {
                 AriftApplication.instance.injectionManager.shutdown()
-                detach()
+                onExit?.invoke()
                 return
             }
             activeTab = tab
